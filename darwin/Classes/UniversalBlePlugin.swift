@@ -22,6 +22,13 @@ public class UniversalBlePlugin: NSObject, FlutterPlugin {
   }
 }
 
+private func isBluetoothAuthorized() -> Bool {
+  if #available(iOS 13.1, macOS 10.15, *) {
+    return CBCentralManager.authorization == .allowedAlways
+  }
+  return true
+}
+
 private var discoveredPeripherals = [String: CBPeripheral]()
 
 // Cache last advertised local name for peripherals
@@ -59,7 +66,7 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
   }
 
   func hasPermissions(withAndroidFineLocation _: Bool) throws -> Bool {
-    return CBCentralManager.authorization == .allowedAlways
+    return isBluetoothAuthorized()
   }
 
   func requestPermissions(withAndroidFineLocation _: Bool, completion: @escaping (Result<Void, any Error>) -> Void) {
@@ -120,7 +127,7 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
   }
 
   func isScanning() throws -> Bool {
-    if CBCentralManager.authorization == .allowedAlways {
+    if isBluetoothAuthorized() {
       return manager.isScanning
     }
     return isManageScanning
