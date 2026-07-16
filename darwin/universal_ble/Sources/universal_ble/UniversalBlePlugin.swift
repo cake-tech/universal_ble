@@ -55,6 +55,13 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
     super.init()
   }
 
+  private func isBluetoothAuthorized() -> Bool {
+    if #available(iOS 13.1, macOS 10.15, *) {
+      return CBCentralManager.authorization == .allowedAlways
+    }
+    return false
+  }
+
   func getBluetoothAvailabilityState(completion: @escaping (Result<AvailabilityState, Error>) -> Void) {
     if manager.state != .unknown {
       completion(.success(manager.state.toAvailabilityState()))
@@ -65,7 +72,7 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
   }
 
   func hasPermissions(withAndroidFineLocation _: Bool) throws -> Bool {
-    return CBCentralManager.authorization == .allowedAlways
+    return isBluetoothAuthorized()
   }
 
   func requestPermissions(withAndroidFineLocation _: Bool, completion: @escaping (Result<Void, any Error>) -> Void) {
@@ -126,7 +133,7 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
   }
 
   func isScanning() throws -> Bool {
-    if CBCentralManager.authorization == .allowedAlways {
+    if isBluetoothAuthorized() {
       return manager.isScanning
     }
     return isManageScanning
