@@ -74,6 +74,31 @@ enum BleConnectionPriority {
 
 enum AndroidScanMode { balanced, lowLatency, lowPower, opportunistic }
 
+/// Mirrors `android.bluetooth.le.ScanSettings#setCallbackType`. Pass any
+/// combination via `AndroidOptions.callbackType` (the plugin OR-folds the list
+/// before calling `setCallbackType`).
+///
+/// API-level notes:
+/// * [allMatches] — API 21+
+/// * [firstMatch], [matchLost] — API 23+ (Marshmallow). Silently dropped on
+///   older devices.
+/// * [allMatchesAutoBatch] — API 34+ (Upside Down Cake). Silently dropped on
+///   older devices.
+///
+/// See https://developer.android.com/reference/android/bluetooth/le/ScanSettings
+enum AndroidScanCallbackType {
+  allMatches,
+  firstMatch,
+  matchLost,
+  allMatchesAutoBatch,
+}
+
+/// Mirrors `android.bluetooth.le.ScanSettings#setMatchMode`.
+enum AndroidScanMatchMode { aggressive, sticky }
+
+/// Mirrors `android.bluetooth.le.ScanSettings#setNumOfMatches`.
+enum AndroidScanNumOfMatches { one, few, max }
+
 enum CharacteristicProperty {
   broadcast,
   read,
@@ -121,6 +146,26 @@ class UniversalBleDescriptor {
   UniversalBleDescriptor(this.uuid);
 }
 
+/// Link-layer connection parameters reported by Android [onConnectionUpdated].
+///
+/// [interval] and [supervisionTimeout] use BLE connection parameter units
+/// (multiply interval by 1.25 for ms; supervisionTimeout by 10 for ms).
+class BleConnectionParametersUpdated {
+  final String deviceId;
+  final int interval;
+  final int latency;
+  final int supervisionTimeout;
+  final int status;
+
+  BleConnectionParametersUpdated({
+    required this.deviceId,
+    required this.interval,
+    required this.latency,
+    required this.supervisionTimeout,
+    required this.status,
+  });
+}
+
 /// Scan models
 /// Android options to scan devices
 /// [requestLocationPermission] is used to request location permission on Android 12+ (API 31+).
@@ -128,14 +173,42 @@ class UniversalBleDescriptor {
 /// Set [reportDelayMillis] timestamp for Bluetooth LE scan. If set to 0, you will be notified of scan results immediately.
 /// If > 0, scan results are queued up and delivered after the requested delay or 5000 milliseconds (whichever is higher).
 /// Note scan results may be delivered sooner if the internal buffers fill up.
+/// [callbackType], [matchMode], and [numOfMatches] map directly to the equivalent
+/// `android.bluetooth.le.ScanSettings` setters. When `null`, the plugin leaves them
+/// at the platform default — set them only if you need to override platform-side
+/// advert de-duplication (e.g. on Pixel hardware where the default settings
+/// throttle advertisements compared with nRF Connect).
+///
+/// [callbackType] is a list because Android's `setCallbackType` accepts any
+/// bitwise combination of [AndroidScanCallbackType] values (for example
+/// `[firstMatch, matchLost]` to be notified once on entry and again on exit).
+/// The plugin OR-folds the list before calling the native API. Values that
+/// require a newer API than the device supports are silently dropped (and
+/// logged); see the [AndroidScanCallbackType] doc for per-value API levels.
+///
+/// [legacy] controls whether only legacy advertisements (BLE 4.2 and below) are
+/// returned (API 26+). When `null` or `false`, the plugin scans for BLE 5
+/// extended advertisements only (the library default, unchanged from prior
+/// releases). Set to `true` for legacy BLE 4.x advertisements (e.g. ESP32); on
+/// API 26+ the plugin sets `setLegacy(true)` and does not set `PHY`.
+///
+/// See https://developer.android.com/reference/android/bluetooth/le/ScanSettings
 class AndroidOptions {
   bool? requestLocationPermission;
   AndroidScanMode? scanMode;
   int? reportDelayMillis;
+  List<AndroidScanCallbackType>? callbackType;
+  AndroidScanMatchMode? matchMode;
+  AndroidScanNumOfMatches? numOfMatches;
+  bool? legacy;
   AndroidOptions({
     this.requestLocationPermission,
     this.scanMode,
     this.reportDelayMillis,
+    this.callbackType,
+    this.matchMode,
+    this.numOfMatches,
+    this.legacy,
   });
 }
 
@@ -188,7 +261,18 @@ class UniversalManufacturerData {
 
 class PeripheralAndroidOptions {
   bool? addManufacturerDataInScanResponse;
-  PeripheralAndroidOptions({this.addManufacturerDataInScanResponse});
+
+  /// Put advertised service UUIDs in the scan response instead of the primary
+  /// advertisement. The Android primary advertisement and scan response are
+  /// both capped at 31 bytes. A 128-bit service UUID (18 bytes) plus a
+  /// device name can overflow the primary packet.
+  /// Note: If this is enabled with `addManufacturerDataInScanResponse`, ensure
+  /// the combined data fits within the scan response's 31-byte limit.
+  bool? addServicesInScanResponse;
+  PeripheralAndroidOptions({
+    this.addManufacturerDataInScanResponse,
+    this.addServicesInScanResponse,
+  });
 }
 
 class PeripheralPlatformConfig {
@@ -342,6 +426,8 @@ abstract class UniversalBleCallbackChannel {
   );
 
   void onConnectionChanged(String deviceId, bool connected, String? error);
+
+  void onConnectionParametersUpdated(BleConnectionParametersUpdated update);
 }
 
 /// Flutter -> Native (peripheral)

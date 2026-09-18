@@ -115,6 +115,38 @@ enum class AndroidScanMode {
   kOpportunistic = 3
 };
 
+// Mirrors `android.bluetooth.le.ScanSettings#setCallbackType`. Pass any
+// combination via `AndroidOptions.callbackType` (the plugin OR-folds the list
+// before calling `setCallbackType`).
+//
+// API-level notes:
+// * [allMatches] — API 21+
+// * [firstMatch], [matchLost] — API 23+ (Marshmallow). Silently dropped on
+//   older devices.
+// * [allMatchesAutoBatch] — API 34+ (Upside Down Cake). Silently dropped on
+//   older devices.
+//
+// See https://developer.android.com/reference/android/bluetooth/le/ScanSettings
+enum class AndroidScanCallbackType {
+  kAllMatches = 0,
+  kFirstMatch = 1,
+  kMatchLost = 2,
+  kAllMatchesAutoBatch = 3
+};
+
+// Mirrors `android.bluetooth.le.ScanSettings#setMatchMode`.
+enum class AndroidScanMatchMode {
+  kAggressive = 0,
+  kSticky = 1
+};
+
+// Mirrors `android.bluetooth.le.ScanSettings#setNumOfMatches`.
+enum class AndroidScanNumOfMatches {
+  kOne = 0,
+  kFew = 1,
+  kMax = 2
+};
+
 enum class CharacteristicProperty {
   kBroadcast = 0,
   kRead = 1,
@@ -391,6 +423,58 @@ class UniversalBleDescriptor {
 };
 
 
+// Link-layer connection parameters reported by Android [onConnectionUpdated].
+//
+// [interval] and [supervisionTimeout] use BLE connection parameter units
+// (multiply interval by 1.25 for ms; supervisionTimeout by 10 for ms).
+//
+// Generated class from Pigeon that represents data sent in messages.
+class BleConnectionParametersUpdated {
+ public:
+  // Constructs an object setting all fields.
+  explicit BleConnectionParametersUpdated(
+    const std::string& device_id,
+    int64_t interval,
+    int64_t latency,
+    int64_t supervision_timeout,
+    int64_t status);
+
+  const std::string& device_id() const;
+  void set_device_id(std::string_view value_arg);
+
+  int64_t interval() const;
+  void set_interval(int64_t value_arg);
+
+  int64_t latency() const;
+  void set_latency(int64_t value_arg);
+
+  int64_t supervision_timeout() const;
+  void set_supervision_timeout(int64_t value_arg);
+
+  int64_t status() const;
+  void set_status(int64_t value_arg);
+
+  bool operator==(const BleConnectionParametersUpdated& other) const;
+  bool operator!=(const BleConnectionParametersUpdated& other) const;
+  /// Returns a hash code value for the object. This method is supported for the benefit of hash tables.
+  size_t Hash() const;
+ private:
+  static BleConnectionParametersUpdated FromEncodableList(const ::flutter::EncodableList& list);
+  ::flutter::EncodableList ToEncodableList() const;
+  friend class UniversalBlePlatformChannel;
+  friend class UniversalBleCallbackChannel;
+  friend class UniversalBlePeripheralChannel;
+  friend class UniversalBleAndroidChannel;
+  friend class UniversalBlePeripheralCallback;
+  friend class PigeonInternalCodecSerializer;
+  std::string device_id_;
+  int64_t interval_;
+  int64_t latency_;
+  int64_t supervision_timeout_;
+  int64_t status_;
+};
+
+
 // Scan models
 // Android options to scan devices
 // [requestLocationPermission] is used to request location permission on Android 12+ (API 31+).
@@ -398,6 +482,26 @@ class UniversalBleDescriptor {
 // Set [reportDelayMillis] timestamp for Bluetooth LE scan. If set to 0, you will be notified of scan results immediately.
 // If > 0, scan results are queued up and delivered after the requested delay or 5000 milliseconds (whichever is higher).
 // Note scan results may be delivered sooner if the internal buffers fill up.
+// [callbackType], [matchMode], and [numOfMatches] map directly to the equivalent
+// `android.bluetooth.le.ScanSettings` setters. When `null`, the plugin leaves them
+// at the platform default — set them only if you need to override platform-side
+// advert de-duplication (e.g. on Pixel hardware where the default settings
+// throttle advertisements compared with nRF Connect).
+//
+// [callbackType] is a list because Android's `setCallbackType` accepts any
+// bitwise combination of [AndroidScanCallbackType] values (for example
+// `[firstMatch, matchLost]` to be notified once on entry and again on exit).
+// The plugin OR-folds the list before calling the native API. Values that
+// require a newer API than the device supports are silently dropped (and
+// logged); see the [AndroidScanCallbackType] doc for per-value API levels.
+//
+// [legacy] controls whether only legacy advertisements (BLE 4.2 and below) are
+// returned (API 26+). When `null` or `false`, the plugin scans for BLE 5
+// extended advertisements only (the library default, unchanged from prior
+// releases). Set to `true` for legacy BLE 4.x advertisements (e.g. ESP32); on
+// API 26+ the plugin sets `setLegacy(true)` and does not set `PHY`.
+//
+// See https://developer.android.com/reference/android/bluetooth/le/ScanSettings
 //
 // Generated class from Pigeon that represents data sent in messages.
 class AndroidOptions {
@@ -409,7 +513,11 @@ class AndroidOptions {
   explicit AndroidOptions(
     const bool* request_location_permission,
     const AndroidScanMode* scan_mode,
-    const int64_t* report_delay_millis);
+    const int64_t* report_delay_millis,
+    const ::flutter::EncodableList* callback_type,
+    const AndroidScanMatchMode* match_mode,
+    const AndroidScanNumOfMatches* num_of_matches,
+    const bool* legacy);
 
   const bool* request_location_permission() const;
   void set_request_location_permission(const bool* value_arg);
@@ -422,6 +530,22 @@ class AndroidOptions {
   const int64_t* report_delay_millis() const;
   void set_report_delay_millis(const int64_t* value_arg);
   void set_report_delay_millis(int64_t value_arg);
+
+  const ::flutter::EncodableList* callback_type() const;
+  void set_callback_type(const ::flutter::EncodableList* value_arg);
+  void set_callback_type(const ::flutter::EncodableList& value_arg);
+
+  const AndroidScanMatchMode* match_mode() const;
+  void set_match_mode(const AndroidScanMatchMode* value_arg);
+  void set_match_mode(const AndroidScanMatchMode& value_arg);
+
+  const AndroidScanNumOfMatches* num_of_matches() const;
+  void set_num_of_matches(const AndroidScanNumOfMatches* value_arg);
+  void set_num_of_matches(const AndroidScanNumOfMatches& value_arg);
+
+  const bool* legacy() const;
+  void set_legacy(const bool* value_arg);
+  void set_legacy(bool value_arg);
 
   bool operator==(const AndroidOptions& other) const;
   bool operator!=(const AndroidOptions& other) const;
@@ -440,6 +564,10 @@ class AndroidOptions {
   std::optional<bool> request_location_permission_;
   std::optional<AndroidScanMode> scan_mode_;
   std::optional<int64_t> report_delay_millis_;
+  std::optional<::flutter::EncodableList> callback_type_;
+  std::optional<AndroidScanMatchMode> match_mode_;
+  std::optional<AndroidScanNumOfMatches> num_of_matches_;
+  std::optional<bool> legacy_;
 };
 
 
@@ -601,11 +729,23 @@ class PeripheralAndroidOptions {
   PeripheralAndroidOptions();
 
   // Constructs an object setting all fields.
-  explicit PeripheralAndroidOptions(const bool* add_manufacturer_data_in_scan_response);
+  explicit PeripheralAndroidOptions(
+    const bool* add_manufacturer_data_in_scan_response,
+    const bool* add_services_in_scan_response);
 
   const bool* add_manufacturer_data_in_scan_response() const;
   void set_add_manufacturer_data_in_scan_response(const bool* value_arg);
   void set_add_manufacturer_data_in_scan_response(bool value_arg);
+
+  // Put advertised service UUIDs in the scan response instead of the primary
+  // advertisement. The Android primary advertisement and scan response are
+  // both capped at 31 bytes. A 128-bit service UUID (18 bytes) plus a
+  // device name can overflow the primary packet.
+  // Note: If this is enabled with `addManufacturerDataInScanResponse`, ensure
+  // the combined data fits within the scan response's 31-byte limit.
+  const bool* add_services_in_scan_response() const;
+  void set_add_services_in_scan_response(const bool* value_arg);
+  void set_add_services_in_scan_response(bool value_arg);
 
   bool operator==(const PeripheralAndroidOptions& other) const;
   bool operator!=(const PeripheralAndroidOptions& other) const;
@@ -622,6 +762,7 @@ class PeripheralAndroidOptions {
   friend class UniversalBlePeripheralCallback;
   friend class PigeonInternalCodecSerializer;
   std::optional<bool> add_manufacturer_data_in_scan_response_;
+  std::optional<bool> add_services_in_scan_response_;
 };
 
 
@@ -1020,6 +1161,10 @@ class UniversalBleCallbackChannel {
     const std::string& device_id,
     bool connected,
     const std::string* error,
+    std::function<void(void)>&& on_success,
+    std::function<void(const FlutterError&)>&& on_error);
+  void OnConnectionParametersUpdated(
+    const BleConnectionParametersUpdated& update,
     std::function<void(void)>&& on_success,
     std::function<void(const FlutterError&)>&& on_error);
  private:

@@ -32,7 +32,7 @@ A cross-platform (Android/iOS/macOS/Windows/Linux/Web) Bluetooth Low Energy (BLE
 - [Timeout](#timeout)
 - [Error Handling](#error-handling)
 - [UUID Format Agnostic](#uuid-format-agnostic)
-- [Permissions](#permissions)
+- [Platform-specific setup](#platform-specific-setup)
 - [Peripheral Mode](#peripheral-mode)
 
 ## API Support
@@ -58,6 +58,7 @@ A cross-platform (Android/iOS/macOS/Windows/Linux/Web) Bluetooth Low Energy (BLE
 | onAvailabilityChange          |   ✔️    | ✔️  |  ✔️   |   ✔️    |  ✔️   | ✔️  |
 | requestMtu                    |   ✔️    | ✔️  |  ✔️   |   ✔️    |  ✔️   | ❌  |
 | requestConnectionPriority     |   ✔️    | ❌  |  ❌   |   ❌    |  ❌   | ❌  |
+| onConnectionParametersChange  |   ✔️    | ❌  |  ❌   |   ❌    |  ❌   | ❌  |
 | readRssi                      |   ✔️    | ✔️  |  ✔️   |   ❌    |  🚧   | ❌  |
 | requestPermissions            |   ✔️    | ✔️  |  ✔️   |   ✔️    |  ✔️   | ✔️  |
 
@@ -512,6 +513,23 @@ await UniversalBle.requestConnectionPriority(
 > **Note:** Only supported on Android. On all other platforms this throws `UniversalBleException` with code `notSupported`.
 > Call this after connecting and after `requestMtu()`, before beginning data transfer.
 
+The OS may later change connection parameters without your app requesting it (e.g. for power saving), which can reduce throughput. On Android API 26+, set `UniversalBle.onConnectionParametersChange` and react if needed:
+
+```dart
+UniversalBle.onConnectionParametersChange = (update) {
+  if (update.deviceId != deviceId || !update.isSuccess) return;
+  // Prefer intervalMs for throughput decisions; estimatedPriority is approximate.
+  if (update.intervalMs > 50) {
+    UniversalBle.requestConnectionPriority(
+      deviceId,
+      BleConnectionPriority.highPerformance,
+    );
+  }
+};
+```
+
+> **Note:** Re-requesting high priority on every update can fight the OS power manager — debounce in app code. Requires Android API 26+ (`BleCapabilities.supportsConnectionParametersUpdates`).
+
 ### Reading RSSI
 
 Read the signal strength (RSSI) of a connected device.
@@ -539,6 +557,13 @@ If you want to parallelize commands between multiple devices, you can set:
 UniversalBle.queueType = QueueType.perDevice;
 ```
 
+You can have separate queues by passing an optional `queueId`. Commands with the same `queueId` are serialized together, but run in parallel with both `QueueType.perDevice` and `QueueType.global`:
+
+```dart
+UniversalBle.write(deviceId, service, char, value1, queueId: '1');
+UniversalBle.write(deviceId, service, char, value2, queueId: '2');
+```
+
 You can also completely disable the queue and batch all commands, even for the same device, by using:
 
 ```dart
@@ -557,13 +582,20 @@ UniversalBle.onQueueUpdate = (String id, int remainingItems) {
 };
 ```
 
-To clear the queue:
+To clear a queue:
 
 ```dart
-  /// Use [BleCommandQueue.globalQueueId] to clear the global queue.
-  /// To clear the queue of a specific device, use `deviceId` as [id].
-  /// If no [id] is provided, all queues will be cleared.
-  UniversalBle.clearQueue(BleCommandQueue.globalQueueId);
+// Clear global queue
+UniversalBle.clearQueue(BleCommandQueue.globalQueueId);
+
+// Clear a per-device queue (when queueType is perDevice)
+UniversalBle.clearQueue(deviceId);
+
+// Clear a custom queue (same string passed as queueId to read/write/etc.)
+UniversalBle.clearQueue('customQueueId');
+
+// Clear all queues
+UniversalBle.clearQueue();
 ```
 
 ## Timeout
@@ -892,7 +924,7 @@ BleUuidParser.number(0x180A); // "0000180a-0000-1000-8000-00805f9b34fb"
 BleUuidParser.compare("180a","0000180A-0000-1000-8000-00805F9B34FB"); // true
 ```
 
-## Permissions
+## Platform-specific setup
 
 You need to perform the following setups:
 
@@ -937,6 +969,23 @@ If your app uses peripheral advertising, add:
 <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
 ```
 
+#### Android scan options
+
+By default, BLE 5 extended advertisements are scanned (API 26+, unchanged from prior releases). Set `legacy: true` for legacy BLE 4.x devices (e.g. ESP32).
+
+```dart
+UniversalBle.startScan(
+  platformConfig: PlatformConfig(
+    android: AndroidOptions(
+      legacy: true, // omit for extended BLE 5 (default)
+      scanMode: AndroidScanMode.lowLatency,
+      callbackType: [AndroidScanCallbackType.allMatches],
+      requestLocationPermission: false,
+    ),
+  ),
+);
+```
+
 #### Background Scanning (ForegroundTask)
 
 Universal BLE supports BLE scanning from background services (e.g., using `flutter_foreground_task` or similar packages) on Android. When running in a background context without an Activity:
@@ -975,6 +1024,27 @@ Use clear, user-facing text that explains why Bluetooth is needed in your app.
 Add the `Bluetooth` capability to the macOS app from Xcode.
 
 **Permissions are automatically requested when calling `startScan()`.** You can also manually call `requestPermissions()` if needed.
+
+#### iOS background state restoration
+
+On iOS, when your app declares the `bluetooth-central` background mode and Bluetooth permission is already granted, the central manager is created at launch with a `CBCentralManagerOptionRestoreIdentifierKey`, so CoreBluetooth can [relaunch your app](https://developer.apple.com/documentation/technotes/tn3115-bluetooth-state-restoration-app-relaunch-rules) in the background when a connected peripheral has activity, and hand the live connection back to the plugin. If permission has not been granted yet, creation is deferred until a central BLE API (such as `startScan()` or `connect()`) is called.
+
+To opt in, declare the `Uses Bluetooth LE accessories` background mode. After enabling it, in `Info.plist` you should have:
+
+```xml
+<key>UIBackgroundModes</key>
+<array>
+  ...
+  <string>bluetooth-central</string>
+  ...
+</array>
+```
+
+Notes:
+
+- Without the `bluetooth-central` background mode, `CBCentralManager` is created lazily on the first central BLE API call and state restoration is disabled.
+- macOS does not support CoreBluetooth state restoration; this behavior is iOS-only.
+- On relaunch, the plugin re-adopts the restored peripherals and emits `onConnectionChanged` for any that are still connected, so your Dart code can resume where it left off.
 
 ### Windows
 
@@ -1038,7 +1108,7 @@ UniversalBle.requestPermissions(
 );
 ```
 
-> **Note**: When calling `startScan()`, permissions are automatically requested. To configure location permission requests during scanning, use the `platformConfig` parameter:
+> **Note**: When calling `startScan()`, permissions are automatically requested. To configure location permission requests during scanning, use `requestLocationPermission` on `AndroidOptions` (see [Android scan options](#android-scan-options)):
 
 ```dart
 UniversalBle.startScan(
@@ -1161,7 +1231,7 @@ Here are some of the apps leveraging the power of `universal_ble`:
 - [**Universal BLE**](https://github.com/Navideck/Universal-BLE) - A comprehensive developer tool for exploring and testing Bluetooth Low Energy (BLE) devices. It enables scanning for nearby BLE devices, connecting to peripherals, discovering and exploring services, characteristics, and descriptors. Supports reading and writing characteristic values, enabling notifications and indications, viewing device information and signal strength, and provides detailed logging of BLE operations. Perfect for developers, engineers, and hobbyist tinkerers working with BLE-enabled devices across iOS, Android, macOS, Windows, Linux & Web.
 - [**BT Cam**](https://btcam.app) - A Bluetooth remote app for DSLR and mirrorless cameras. Compatible with Canon, Nikon, Sony, Fujifilm, GoPro, Olympus, Panasonic, Pentax, and Blackmagic. Built using Universal BLE to connect and control cameras across iOS, Android, macOS, Windows, Linux & Web.
 - [**TukToro**](https://tuktoro.com/en/pages/download-math-learning-app) - Interactive math learning app for kids. Available on iPad and Android tablets, featuring hand-drawn levels, didactic learning games, and ad-free child-safe environment.
-- [**BikeControl**](https://github.com/jonasbark/swiftcontrol) - Control your favorite trainer app using Zwift Click, Zwift Ride, Zwift Play, Shimano Di2, or other similar devices. Enables virtual gear shifting, steering, workout intensity adjustment, and more across iOS, Android, macOS, Windows, and Linux.
+- [**BikeControl**](https://github.com/OpenBikeControl/bikecontrol) - Control your favorite trainer app using Zwift Click, Zwift Ride, Zwift Play, Shimano Di2, or other similar devices. It enables virtual gear shifting, steering, workout intensity adjustment, and more across iOS, Android, macOS, Windows, and Linux.
 - [**Roll Feathers**](https://github.com/cliftbar/roll_feathers) - Companion app for Bluetooth enabled dice. Connect multiple supported dice (Pixel Dice, GoDice, Virtual Dice), track roll history, and integrate with Home Assistant. Available on Android, iOS, macOS, Windows, Linux, and Web.
 - [**OpenEarable**](https://open-earable.teco.edu/) - Fully open-source AI platform for ear-based sensing applications with true wireless audio. Features high-precision sensors for biosensing, cardiac monitoring, and motion tracking. Cross-platform support for iOS, Android, and desktop platforms.
 - [**Ledger Flutter Plus**](https://github.com/vespr-wallet/ledger-flutter-plus) - A Flutter plugin to scan, connect & sign transactions using Ledger Nano devices via USB & BLE. Supports Android, iOS, and Web platforms for secure cryptocurrency wallet management.
