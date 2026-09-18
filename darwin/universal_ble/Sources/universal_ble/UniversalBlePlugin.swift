@@ -55,11 +55,15 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
     }()
 
     private static var hasBluetoothPermission: Bool {
-      CBCentralManager.authorization == .allowedAlways
+      if #available(iOS 13.1, *) {
+        return CBCentralManager.authorization == .allowedAlways
+      }
+      return false
     }
 
     /// Availability derived from `CBCentralManager.authorization` without creating a manager.
     private static var availabilityStateFromAuthorization: AvailabilityState {
+      guard #available(iOS 13.1, *) else { return .unknown }
       switch CBCentralManager.authorization {
       case .restricted, .denied:
         return .unauthorized
@@ -107,6 +111,13 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
     super.init()
   }
 
+  private func isBluetoothAuthorized() -> Bool {
+    if #available(iOS 13.1, macOS 10.15, *) {
+      return CBCentralManager.authorization == .allowedAlways
+    }
+    return false
+  }
+
   #if os(iOS)
     /// Eagerly creates the central manager at launch when the app declares the
     /// `bluetooth-central` background mode and Bluetooth permission is already
@@ -135,7 +146,7 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
   }
 
   func hasPermissions(withAndroidFineLocation _: Bool) throws -> Bool {
-    return CBCentralManager.authorization == .allowedAlways
+    return isBluetoothAuthorized()
   }
 
   func requestPermissions(withAndroidFineLocation _: Bool, completion: @escaping (Result<Void, any Error>) -> Void) {
@@ -196,7 +207,7 @@ private class BleCentralDarwin: NSObject, UniversalBlePlatformChannel, CBCentral
   }
 
   func isScanning() throws -> Bool {
-    if CBCentralManager.authorization == .allowedAlways {
+    if isBluetoothAuthorized() {
       return manager.isScanning
     }
     return isManageScanning
